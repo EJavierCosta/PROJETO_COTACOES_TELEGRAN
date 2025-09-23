@@ -1,7 +1,6 @@
-from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, desc, row_number
 from pyspark.sql.window import Window
-import delta
+from delta.tables import DeltaTable
 
 class ingestao:
     def __init__(self, spark, tabela, schema, catalog, dbpath):
@@ -10,9 +9,7 @@ class ingestao:
         self.schema = schema
         self.catalog = catalog
         self.dbpath = dbpath
-        
-        
-
+     
     def carga(self):
         db = (self.spark.read
                         .format("delta")
@@ -39,9 +36,8 @@ class ingestaoCDC (ingestao):
         super().__init__(spark, tabela, schema, catalog, dbpath)
         self.checkpointpath = checkpointpath
         
-
     def settabela (self):
-        bronze = delta.DeltaTable.forName(self.spark, f"{self.catalog}.{self.schema}.{self.tabela}")
+        bronze = DeltaTable.forName(self.spark, f"{self.catalog}.{self.schema}.{self.tabela}")
         return bronze
 
     def upsert (self, df, bronze):
@@ -49,20 +45,23 @@ class ingestaoCDC (ingestao):
         df_filtered = df.filter(col("_change_type") != 'update_preimage')
 
         # Define o registro mais recente por Símbolo
-        windowSpec = Window.partitionBy("Simbolo").orderBy(desc("_commit_timestamp"), desc("_commit_version"))
+        windowSpec = (Window.partitionBy("Simbolo")
+                            .orderBy(desc("_commit_timestamp"), desc("_commit_version"))
+                            )
 
         # Pega a última atualização para cada Símbolo
         df_cotacoes_cdc = (df_filtered.withColumn("row_num", row_number().over(windowSpec))
-                                        .filter(col("row_num") == 1)
-                                        .drop("row_num"))
+                                      .filter(col("row_num") == 1)
+                                      .drop("row_num")
+                                      )
 
         (bronze.alias("b")
-             .merge(df_cotacoes_cdc.alias("c"),"b.Simbolo = c.Simbolo")
-             .whenMatchedDelete(condition = "c._change_type = 'delete'")
-             .whenMatchedUpdateAll(condition = "c._change_type = 'update_postimage'")
-             .whenNotMatchedInsertAll(condition = "c._change_type = 'insert' OR c._change_type = 'update_postimage'")  
-             .execute()
-             )
+               .merge(df_cotacoes_cdc.alias("c"),"b.Simbolo = c.Simbolo")
+               .whenMatchedDelete(condition = "c._change_type = 'delete'")
+               .whenMatchedUpdateAll(condition = "c._change_type = 'update_postimage'")
+               .whenNotMatchedInsertAll(condition = "c._change_type = 'insert' OR c._change_type = 'update_postimage'")  
+               .execute()
+               )
 
     def leituraCDC (self):
         tabela_cdc= (self.spark.readStream
@@ -75,10 +74,10 @@ class ingestaoCDC (ingestao):
         
     def salvaCDC (self, tabela_cdc, bronze):
         stream = (tabela_cdc.writeStream
-                      .trigger(availableNow=True)
-                      .option("checkpointLocation", self.checkpointpath)
-                      .foreachBatch(lambda df, batchId: self.upsert(df, bronze))
-                      )
+                            .trigger(availableNow=True)
+                            .option("checkpointLocation", self.checkpointpath)
+                            .foreachBatch(lambda df, batchId: self.upsert(df, bronze))
+                            )
         return stream.start()
     
     def runCDC (self):
