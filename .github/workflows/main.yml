@@ -37,5 +37,5 @@ jobs:
         env:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
-        working-directory: src/workflows
+        working-directory: workflows
         run: python main.py
