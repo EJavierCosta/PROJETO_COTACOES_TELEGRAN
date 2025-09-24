@@ -1,0 +1,7 @@
+.venv\Scripts\activate
+
+pipreqs . --force --ignore .venv,venv
+
+
+
+pip freeze > requirements.txt
