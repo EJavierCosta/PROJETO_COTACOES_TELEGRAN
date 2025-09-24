@@ -35,7 +35,7 @@ jobs:
 
       - name: Sincronizando Jobs com Databricks
         env:
-          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
-          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          host: ${{ secrets.DATABRICKS_HOST }}
+          tokendatabricks: ${{ secrets.DATABRICKS_TOKEN }}
         working-directory: workflows
         run: python main.py
