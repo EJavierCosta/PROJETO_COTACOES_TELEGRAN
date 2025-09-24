@@ -16,7 +16,7 @@ jobs:
       - name: Configurando Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.12'
+          python-version: '3.13'
 
       - name: Cache do pip
         uses: actions/cache@v3
@@ -27,11 +27,11 @@ jobs:
             ${{ runner.os }}-pip-
 
       - name: Instalando dependências
-        working-directory: src/workflows
+        working-directory: workflows
         run: pip install -r requirements.txt
 
       - name: Verificando existência do main.py
-        run: test -f src/workflows/main.py
+        run: test -f workflows/main.py
 
       - name: Sincronizando Jobs com Databricks
         env:
