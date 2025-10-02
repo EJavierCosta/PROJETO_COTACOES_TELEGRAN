@@ -39,12 +39,13 @@ class ingestaoCDC (ingestao):
     def __init__(self, spark, tabela, schema, catalog, dbpath, checkpointpath):
         super().__init__(spark, tabela, schema, catalog, dbpath)
         self.checkpointpath = checkpointpath
+        self.query = query
         
     def settabela (self):
-        tabela = DeltaTable.forName(self.spark, f"{self.catalog}.{self.schema}.{self.tabela}")
-        return tabela
+        tabela_destino = DeltaTable.forName(self.spark, f"{self.catalog}.{self.schema}.{self.tabela}")
+        return tabela_destino
 
-    def upsert (self, df, tabela):
+    def upsert (self, df, tabela_destino):
         # Filtra os tipos de mudança que não interessam
         df_filtered = df.filter(col("_change_type") != 'update_preimage')
 
@@ -59,7 +60,7 @@ class ingestaoCDC (ingestao):
                                       .drop("row_num")
                                       )
 
-        (tabela.alias("b")
+        (tabela_destino.alias("b")
                .merge(df_cotacoes_cdc.alias("c"),"b.Simbolo = c.Simbolo")
                .whenMatchedDelete(condition = "c._change_type = 'delete'")
                .whenMatchedUpdateAll(condition = "c._change_type = 'update_postimage'")
@@ -67,65 +68,31 @@ class ingestaoCDC (ingestao):
                .execute()
                )
 
-    def leituraCDC (self):
-        tabela_cdc= (self.spark.readStream
-                               .format("delta")
-                               .option("readChangeFeed", "true")
-                               .option("startingVersion", 0)  
-                               .table(self.dbpath)
-                               )
-        return tabela_cdc
-        
-    def salvaCDC (self, tabela_cdc, tabela):
-        stream = (tabela_cdc.writeStream
-                            .trigger(availableNow=True)
-                            .option("checkpointLocation", self.checkpointpath)
-                            .foreachBatch(lambda df, batchId: self.upsert(df, tabela))
-                            )
-        return stream.start()
-    
-    def runCDC (self):
-        tabela = self.settabela()
-        tabela_cdc = self.leituraCDC()
-        return self.salvaCDC(tabela_cdc, tabela)
-    
-    
-class ingestaoCDF (ingestaoCDC):
-    
-    #CDF spark + SQL
+    def upsert_sql (self, df, tabela_destino):
+        df.createOrReplaceGlobalTempView(f"global_temp_{self.tabela}")
 
-    def __init__(self, spark, tabela, schema, catalog, dbpath, checkpointpath):
-        super().__init__(self, spark, tabela, schema, catalog, dbpath, checkpointpath)
-        
-        
-    def settabela (self):
-        silver = DeltaTable.forName(self.spark, f"{self.catalog}.{self.schema}.{self.tabela}")
-        return silver
-
-    def upsert (self, df, silver):
-        df.createOrReplaceGlobalTempView(f"silver_{self.tablename}")
-
-        query = f"""
+        query_filtro = f"""
         SELECT *
-        FROM global_temp.silver_{self.tablename}
+        FROM global_temp.global_temp_{self.tabela}
         WHERE _change_type <> 'update_preimage'
         QUALIFY ROW_NUMBER() OVER (PARTITION BY Simbolo ORDER BY _commit_timestamp DESC) = 1
         """
-        df_cdf = self.spark.sql(query)
-        df_upsert = self.spark.sql(self.query, df=df_cdf)
+        df_cdf = self.spark.sql(query_filtro)
 
-        (self.silver
-             .alias("s")
-             .merge(df_upsert.alias("d"), f"s.{self.id_field} = d.{self.id_field}") 
-             .whenMatchedDelete(condition = "d._change_type = 'delete'")
-             .whenMatchedUpdateAll(condition = "d._change_type = 'update_postimage'")
-             .whenNotMatchedInsertAll(condition = "d._change_type = 'insert' OR d._change_type = 'update_postimage'")
-               .execute())
+        # Substitui qualquer coisa depois de FROM por "df"
+        query_modificada = re.sub(r"FROM\s+[\w\.\"]+", "FROM df", self.query, flags=re.IGNORECASE)
+        query_modificada = re.sub(r"(SELECT\s+.*?)(FROM)", r"\1,_change_type \2", query_modificada, flags=re.IGNORECASE|re.DOTALL)
+        df_cdf_atualizada = self.spark.sql(query_modificada, df=df_cdf)
 
-    def execute(self):
-        df = self.load()
-        return self.save(df)
-
+        (self.tabela_destino
+             .alias("a")
+             .merge(df_cdf_atualizado.alias("b"), f"a.TIKER = d.TIKER") 
+             .whenMatchedDelete(condition = "b._change_type = 'delete'")
+             .whenMatchedUpdateAll(condition = "b._change_type = 'update_postimage'")
+             .whenNotMatchedInsertAll(condition = "b._change_type = 'insert' OR b._change_type = 'update_postimage'")
+             .execute()
+             )
+            
     def leituraCDC (self):
         tabela_cdc= (self.spark.readStream
                                .format("delta")
@@ -135,15 +102,17 @@ class ingestaoCDF (ingestaoCDC):
                                )
         return tabela_cdc
         
-    def salvaCDC (self, tabela_cdc, bronze):
+    def salvaCDC (self, tabela_cdc, tabela_destino):
         stream = (tabela_cdc.writeStream
                             .trigger(availableNow=True)
                             .option("checkpointLocation", self.checkpointpath)
-                            .foreachBatch(lambda df, batchId: self.upsert(df, bronze))
+                            .foreachBatch(lambda df, batchId: self.upsert(df, tabela_destino))
                             )
         return stream.start()
     
     def runCDC (self):
-        bronze = self.settabela()
+        tabela_destino = self.settabela()
         tabela_cdc = self.leituraCDC()
-        return self.salvaCDC(tabela_cdc, bronze)
+        return self.salvaCDC(tabela_cdc, tabela_destino)
+    
+    
