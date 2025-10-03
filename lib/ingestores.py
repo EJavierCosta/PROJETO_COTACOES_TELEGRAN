@@ -106,9 +106,9 @@ class ingestaoCDF (ingestaoCDC):
         QUALIFY ROW_NUMBER() OVER (PARTITION BY Simbolo ORDER BY _commit_timestamp DESC) = 1
         """
 
-        df_cdf = self.spark.sql(query_filtro, df=df)     
+        df_cdf = self.spark.sql(query_filtro)     
         df_cdf.createOrReplaceTempView("df")
-        query_modificada = trata_query(query)
+        query_modificada = trata_query(self.query)
         df_cdf_atualizado = self.spark.sql(query_modificada)
 
         (tabela_destino.alias("a")
