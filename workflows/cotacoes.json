@@ -62,6 +62,44 @@
         "timeout_seconds": 0,
         "email_notifications": {},
         "webhook_notifications": {}
+      },
+      {
+        "task_key": "bronze_to_silver",
+        "depends_on": [
+          {
+            "task_key": "transacional_to_bronze"
+          }
+        ],
+        "run_if": "ALL_SUCCESS",
+        "notebook_task": {
+          "notebook_path": "silver/bronze_to_silver",
+          "base_parameters": {
+            "tabela": "cotacoes"
+          },
+          "source": "GIT"
+        },
+        "timeout_seconds": 0,
+        "email_notifications": {},
+        "webhook_notifications": {}
+      },
+      {
+        "task_key": "bronze_to_silver_hist",
+        "depends_on": [
+          {
+            "task_key": "transacional_to_bronze_hist"
+          }
+        ],
+        "run_if": "ALL_SUCCESS",
+        "notebook_task": {
+          "notebook_path": "silver/bronze_to_silver",
+          "base_parameters": {
+            "tabela": "hist_cotacoes"
+          },
+          "source": "GIT"
+        },
+        "timeout_seconds": 0,
+        "email_notifications": {},
+        "webhook_notifications": {}
       }
     ],
     "git_source": {
