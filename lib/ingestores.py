@@ -108,7 +108,7 @@ class ingestaoCDF (ingestaoCDC):
 
         df_cdf = self.spark.sql(query_filtro)     
         df_cdf.createOrReplaceTempView("df")
-        query_modificada = trata_query(self.query)
+        query_modificada = utils.trata_query(self.query)
         df_cdf_atualizado = self.spark.sql(query_modificada)
 
         (tabela_destino.alias("a")
