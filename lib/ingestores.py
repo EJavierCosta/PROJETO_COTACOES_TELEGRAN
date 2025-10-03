@@ -1,6 +1,7 @@
 from pyspark.sql.functions import col, desc, row_number
 from pyspark.sql.window import Window
 from delta.tables import DeltaTable
+import re
 
 class ingestao:
     #Full Load
@@ -39,7 +40,7 @@ class ingestaoCDC (ingestao):
     def __init__(self, spark, tabela, schema, catalog, dbpath, checkpointpath):
         super().__init__(spark, tabela, schema, catalog, dbpath)
         self.checkpointpath = checkpointpath
-        self.query = query
+        
         
     def settabela (self):
         tabela_destino = DeltaTable.forName(self.spark, f"{self.catalog}.{self.schema}.{self.tabela}")
@@ -68,6 +69,38 @@ class ingestaoCDC (ingestao):
                .execute()
                )
 
+
+            
+    def leituraCDC (self):
+        tabela_cdc= (self.spark.readStream
+                               .format("delta")
+                               .option("readChangeFeed", "true")
+                               .option("startingVersion", 0)  
+                               .table(self.dbpath)
+                               )
+        return tabela_cdc
+        
+    def salvaCDC (self, tabela_cdc, tabela_destino, funcao):
+        stream = (tabela_cdc.writeStream
+                            .trigger(availableNow=True)
+                            .option("checkpointLocation", self.checkpointpath)
+                            .foreachBatch(lambda df, batchId: funcao(df, tabela_destino))
+                            )
+        return stream.start()
+    
+    def runCDC (self):
+        tabela_destino = self.settabela()
+        tabela_cdc = self.leituraCDC()
+        return self.salvaCDC(tabela_cdc, tabela_destino, self.upsert)
+    
+
+    
+class ingestaoCDF (ingestaoCDC):
+
+    def __init__(self, spark, tabela, schema, catalog, dbpath, checkpointpath, query):
+        super().__init__(spark, tabela, schema, catalog, dbpath, checkpointpath)
+        self.query = query
+
     def upsert_sql (self, df, tabela_destino):
         df.createOrReplaceGlobalTempView(f"global_temp_{self.tabela}")
 
@@ -82,37 +115,17 @@ class ingestaoCDC (ingestao):
         # Substitui qualquer coisa depois de FROM por "df"
         query_modificada = re.sub(r"FROM\s+[\w\.\"]+", "FROM df", self.query, flags=re.IGNORECASE)
         query_modificada = re.sub(r"(SELECT\s+.*?)(FROM)", r"\1,_change_type \2", query_modificada, flags=re.IGNORECASE|re.DOTALL)
-        df_cdf_atualizada = self.spark.sql(query_modificada, df=df_cdf)
+        df_cdf_atualizado = self.spark.sql(query_modificada, df=df_cdf)
 
-        (self.tabela_destino
-             .alias("a")
-             .merge(df_cdf_atualizado.alias("b"), f"a.TIKER = d.TIKER") 
-             .whenMatchedDelete(condition = "b._change_type = 'delete'")
-             .whenMatchedUpdateAll(condition = "b._change_type = 'update_postimage'")
-             .whenNotMatchedInsertAll(condition = "b._change_type = 'insert' OR b._change_type = 'update_postimage'")
-             .execute()
-             )
-            
-    def leituraCDC (self):
-        tabela_cdc= (self.spark.readStream
-                               .format("delta")
-                               .option("readChangeFeed", "true")
-                               .option("startingVersion", 0)  
-                               .table(self.dbpath)
-                               )
-        return tabela_cdc
-        
-    def salvaCDC (self, tabela_cdc, tabela_destino):
-        stream = (tabela_cdc.writeStream
-                            .trigger(availableNow=True)
-                            .option("checkpointLocation", self.checkpointpath)
-                            .foreachBatch(lambda df, batchId: self.upsert(df, tabela_destino))
-                            )
-        return stream.start()
-    
-    def runCDC (self):
+        (tabela_destino
+                .alias("a")
+                .merge(df_cdf_atualizado.alias("b"), f"a.TIKER = b.TIKER") 
+                .whenMatchedDelete(condition = "b._change_type = 'delete'")
+                .whenMatchedUpdateAll(condition = "b._change_type = 'update_postimage'")
+                .whenNotMatchedInsertAll(condition = "b._change_type = 'insert' OR b._change_type = 'update_postimage'")
+                .execute()
+                )
+    def runCDF (self):
         tabela_destino = self.settabela()
         tabela_cdc = self.leituraCDC()
-        return self.salvaCDC(tabela_cdc, tabela_destino)
-    
-    
+        return self.salvaCDC(tabela_cdc, tabela_destino, self.upsert_sql)
