@@ -2,6 +2,7 @@ from pyspark.sql.functions import col, desc, row_number
 from pyspark.sql.window import Window
 from delta.tables import DeltaTable
 import re
+import utils
 
 class ingestao:
     #Full Load
@@ -49,27 +50,22 @@ class ingestaoCDC (ingestao):
     def upsert (self, df, tabela_destino):
         # Filtra os tipos de mudança que não interessam
         df_filtered = df.filter(col("_change_type") != 'update_preimage')
-
         # Define o registro mais recente por Símbolo
         windowSpec = (Window.partitionBy("Simbolo")
                             .orderBy(desc("_commit_timestamp"), desc("_commit_version"))
                             )
-
         # Pega a última atualização para cada Símbolo
         df_cotacoes_cdc = (df_filtered.withColumn("row_num", row_number().over(windowSpec))
                                       .filter(col("row_num") == 1)
                                       .drop("row_num")
                                       )
-
         (tabela_destino.alias("b")
-               .merge(df_cotacoes_cdc.alias("c"),"b.Simbolo = c.Simbolo")
-               .whenMatchedDelete(condition = "c._change_type = 'delete'")
-               .whenMatchedUpdateAll(condition = "c._change_type = 'update_postimage'")
-               .whenNotMatchedInsertAll(condition = "c._change_type = 'insert' OR c._change_type = 'update_postimage'")  
-               .execute()
-               )
-
-
+                       .merge(df_cotacoes_cdc.alias("c"),"b.Simbolo = c.Simbolo")
+                       .whenMatchedDelete(condition = "c._change_type = 'delete'")
+                       .whenMatchedUpdateAll(condition = "c._change_type = 'update_postimage'")
+                       .whenNotMatchedInsertAll(condition = "c._change_type = 'insert' OR c._change_type = 'update_postimage'")  
+                       .execute()
+                       )
             
     def leituraCDC (self):
         tabela_cdc= (self.spark.readStream
@@ -109,22 +105,19 @@ class ingestaoCDF (ingestaoCDC):
         WHERE _change_type <> 'update_preimage'
         QUALIFY ROW_NUMBER() OVER (PARTITION BY Simbolo ORDER BY _commit_timestamp DESC) = 1
         """
-        df_cdf = self.spark.sql(query_filtro, df=df)
 
-        # Substitui qualquer coisa depois de FROM por "df"
-        query_modificada = re.sub(r"FROM\s+[\w\.\"]+", "FROM df", self.query, flags=re.IGNORECASE)
-        query_modificada = re.sub(r"(SELECT\s+.*?)(FROM)", r"\1,_change_type \2", query_modificada, flags=re.IGNORECASE|re.DOTALL)
+        df_cdf = self.spark.sql(query_filtro, df=df)     
         df_cdf.createOrReplaceTempView("df")
+        query_modificada = trata_query(query)
         df_cdf_atualizado = self.spark.sql(query_modificada)
 
-        (tabela_destino
-                .alias("a")
-                .merge(df_cdf_atualizado.alias("b"), f"a.TIKER = b.TIKER") 
-                .whenMatchedDelete(condition = "b._change_type = 'delete'")
-                .whenMatchedUpdateAll(condition = "b._change_type = 'update_postimage'")
-                .whenNotMatchedInsertAll(condition = "b._change_type = 'insert' OR b._change_type = 'update_postimage'")
-                .execute()
-                )
+        (tabela_destino.alias("a")
+                       .merge(df_cdf_atualizado.alias("b"), f"a.TIKER = b.TIKER") 
+                       .whenMatchedDelete(condition = "b._change_type = 'delete'")
+                       .whenMatchedUpdateAll(condition = "b._change_type = 'update_postimage'")
+                       .whenNotMatchedInsertAll(condition = "b._change_type = 'insert' OR b._change_type = 'update_postimage'")
+                       .execute()
+                       )
     def runCDF (self):
         tabela_destino = self.settabela()
         tabela_cdc = self.leituraCDC()
