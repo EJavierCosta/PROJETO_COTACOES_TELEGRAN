@@ -5,17 +5,17 @@ import re
 
 class ingestao:
     #Full Load
-    def __init__(self, spark, tabela, schema, catalog, dbpath):
+    def __init__(self, spark, tabela, schema, catalog, path_origem):
         self.spark = spark
         self.tabela = tabela
         self.schema = schema
         self.catalog = catalog
-        self.dbpath = dbpath
+        self.path_origem = path_origem
      
     def carga(self):
         db = (self.spark.read
                         .format("delta")
-                        .table(self.dbpath)
+                        .table(self.path_origem)
                         )   
         return db
     
@@ -37,8 +37,8 @@ class ingestaoCDC (ingestao):
     
     #CDF spark + window
 
-    def __init__(self, spark, tabela, schema, catalog, dbpath, checkpointpath):
-        super().__init__(spark, tabela, schema, catalog, dbpath)
+    def __init__(self, spark, tabela, schema, catalog, path_origem, checkpointpath):
+        super().__init__(spark, tabela, schema, catalog, path_origem)
         self.checkpointpath = checkpointpath
         
         
@@ -76,7 +76,7 @@ class ingestaoCDC (ingestao):
                                .format("delta")
                                .option("readChangeFeed", "true")
                                .option("startingVersion", 0)  
-                               .table(self.dbpath)
+                               .table(self.path_origem)
                                )
         return tabela_cdc
         
@@ -97,25 +97,25 @@ class ingestaoCDC (ingestao):
     
 class ingestaoCDF (ingestaoCDC):
 
-    def __init__(self, spark, tabela, schema, catalog, dbpath, checkpointpath, query):
-        super().__init__(spark, tabela, schema, catalog, dbpath, checkpointpath)
+    def __init__(self, spark, tabela, schema, catalog, path_origem, checkpointpath, query):
+        super().__init__(spark, tabela, schema, catalog, path_origem, checkpointpath)
         self.query = query
 
     def upsert_sql (self, df, tabela_destino):
-        df.createOrReplaceGlobalTempView(f"global_temp_{self.tabela}")
-
+        df.createOrReplaceTempView("df_temp")
         query_filtro = f"""
         SELECT *
-        FROM global_temp.global_temp_{self.tabela}
+        FROM df_temp
         WHERE _change_type <> 'update_preimage'
         QUALIFY ROW_NUMBER() OVER (PARTITION BY Simbolo ORDER BY _commit_timestamp DESC) = 1
         """
-        df_cdf = self.spark.sql(query_filtro)
+        df_cdf = self.spark.sql(query_filtro, df=df)
 
         # Substitui qualquer coisa depois de FROM por "df"
         query_modificada = re.sub(r"FROM\s+[\w\.\"]+", "FROM df", self.query, flags=re.IGNORECASE)
         query_modificada = re.sub(r"(SELECT\s+.*?)(FROM)", r"\1,_change_type \2", query_modificada, flags=re.IGNORECASE|re.DOTALL)
-        df_cdf_atualizado = self.spark.sql(query_modificada, df=df_cdf)
+        df_cdf.createOrReplaceTempView("df")
+        df_cdf_atualizado = self.spark.sql(query_modificada)
 
         (tabela_destino
                 .alias("a")
