@@ -1,7 +1,6 @@
 from pyspark.sql.functions import col, desc, row_number
 from pyspark.sql.window import Window
 from delta.tables import DeltaTable
-import re
 import utils
 
 class ingestao:
