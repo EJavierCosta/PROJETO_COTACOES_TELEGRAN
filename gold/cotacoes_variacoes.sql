@@ -1,4 +1,3 @@
-%sql
 SELECT
     m.TIKER,
     p.PRECO AS preco_atual,
