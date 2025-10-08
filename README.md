@@ -108,6 +108,9 @@ A camada Gold, com seus dados de alta qualidade, serve como a base para a interf
 4.  **Deploy:** Faça um push para a branch `main`. O GitHub Actions será acionado e irá automaticamente criar ou atualizar os jobs no Databricks com o agendamento definido no JSON.
 5.  **Configurar Camada de Consumo:** Configure o Databricks Genie para usar as tabelas da camada Gold e, em seguida, configure o workflow no n8n para conectar o Telegram ao Genie.
 
+## 📜 Licença
+-  Este projeto está sob a licença MIT. Veja o arquivo LICENSE para mais detalhes.
+  
 ## Resumo das Tecnologias
 -   **Core do Pipeline:** Apache Spark (Structured Streaming e Batch)
 -   **Armazenamento e Lakehouse:** Delta Lake
