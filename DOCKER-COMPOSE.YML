@@ -5,8 +5,9 @@ services:
     ports:
       - "5678:5678"
     environment:
-      - TZ=America/Fortaleza
+      - TZ=${TZ}
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - DATABRICKS_TOKEN=${DATABRICKS_TOKEN}
     volumes:
       - ./arquivos:/home/node/.n8n
     restart: unless-stopped
